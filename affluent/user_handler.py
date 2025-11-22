@@ -37,11 +37,15 @@ class UserHandler:
         self.save_users()
         return user_id
     
-    def get_user(self, user_id: int) ->dict:
-        user = self.users[self.users['user_id'] == user_id]
+    def get_user(self, user_id: int=None, username: str=None) ->dict|None:
+        if user_id is None and username is None: return None
+        
+        if user_id is not None: user = self.users[self.users['user_id'] == user_id]
+        else: user = self.users[self.users['username'] == username]
         if len(user)==0: return None
 
         return user.iloc[0].to_dict()
+    
 
-# users = UserHandler()
-# print(users.users)
+users = UserHandler()
+print(users.get_user(username="Alice"))

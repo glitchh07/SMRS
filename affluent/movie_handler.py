@@ -36,11 +36,30 @@ class MovieHandler:
         self.save_movies()
         return movie_id
     
-    def get_movie(self, movie_id: int) ->dict:
-        movie = self.movies[self.movies['movie_id'] == movie_id]
-        if len(movie) == 0: return None
+    def get_movie(self, movie_id: int=None, title: str=None, genre: list=None, year: int=None) ->dict|None:
+        if all(x is None for x in(movie_id, title, genre, year)): return None
 
-        return movie.iloc[0].to_dict()
+        if isinstance(genre, str): genre = [genre]   #converting the genre if its a str
+        
+        df = self.movies
+        mask = pd.Series(True, index=df.index)
+
+        if movie_id is not None: mask &= (df['movie_id']==movie_id)
+        if title is not None: mask &= df['title'].str.contains(title, case=False, na=False)
+        if genre is not None:
+            genre_mask = pd.Series(False, index=df.index)
+            for g in genre:
+                genre_mask |= df['genre'].str.contains(g, case=False, na=False)
+            mask &= genre_mask
+        if year is not None: mask &= (df['year']==year)
+
+        if mask.empty: return None  #checking for valid mask
+
+        filtered_movies = df[mask]
+        if filtered_movies.empty: return None
+
+        return filtered_movies.to_dict(orient="records")
+
     
 # movie_handler = MovieHandler()
 # print(movie_handler.get_movie(101))
