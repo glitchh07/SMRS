@@ -1,6 +1,8 @@
 from affluent.user_handler import UserHandler as UH
 from affluent.movie_handler import MovieHandler as MH
 from affluent.data_handler import DataHandler as DH
+from affluent.pending_handler import PendingHandler as PH
+
 import os
 base_dir = os.path.dirname(os.path.abspath(__file__))
 # data_dir = os.path.join(base_dir, "..", "data")
@@ -13,6 +15,7 @@ class Controller:
         self.users = UH()
         self.movies = MH()
         self.data = DH()
+        self.pending = PH()
 
         self.stats = self.calc_movie_stats()
 
@@ -20,8 +23,9 @@ class Controller:
         new_user_id = self.users.add_user(username=username, age=age)
         return new_user_id
     
-    def get_user(self, username: str) ->dict:
+    def get_user(self, username: str) ->dict|None:
         user_dict = self.users.get_user(username=username)
+        if not user_dict: return None
         return user_dict
     
     def add_movie(self, title: str, genre: str, year: int) ->int:
@@ -67,10 +71,14 @@ class Controller:
         })
 
         #calculating the score
+        C = stats["avg_rating"] #global average
+        m = 50  #minimum rating thresold
+        v = stats["rating_count"]
+        bayesian_score = (v/(v+m)) * C + (m/(v+m)) * C  #industrial formula
+
         score = (
-            stats["avg_rating"] * 0.7 +
-            stats["recommend_ratio"] * 0.3 +
-            np.log1p(stats["rating_count"]) #np.log1p means log(1+p) which is used for small steady values and 1+ to not get log0
+            bayesian_score +  stats["recommend_ratio"] * 0.5
+            # np.log1p(stats["rating_count"]) * 1.4 #np.log1p means log(1+p) which is used for small steady values and 1+ to not get log0
         )
 
         stats["score"] = score  #adding score column to the dataframe and sorting by decending order
@@ -93,19 +101,21 @@ class Controller:
         #getting the movie_id of the candidates through get_movie function
         candidates = self.movies.get_movie(movie_id=movie_id, title=title, genre=genre, year=year)    
 
-        #filtering out only the candidates data from stats
-        if candidates:
-            candidates_idx = [m["movie_id"] for m in candidates]
-            stats=stats.loc[candidates_idx]
+        #filtering out only the candidates data from stats if candidates is not empty
+        if not candidates: return None
+        
+        candidates_idx = [m["movie_id"] for m in candidates]
+        stats=stats.loc[candidates_idx]
         if stats.empty: return None
 
         movies = self.movies.movies
         full = stats.merge(movies, left_index=True, right_on="movie_id")
+        full.sort_values("score", ascending=False, inplace=True)
         # full.drop(columns=["movie_id"], inplace=True)
         # full = full[["title", "genre", "year", "avg_rating"]]
         full.rename(columns={"avg_rating": "rating"}, inplace=True)
 
-        return full.head(10).to_dict(orient="records")
+        return full.head().to_dict(orient="records")
     
     def add_data(self, user_id: int, movie_id: int, rating: int|None, would_recommend: bool|None) ->None:
 
@@ -126,6 +136,7 @@ class Controller:
 
         movies = self.movies.movies
         full = stats.merge(movies, left_index=True, right_on="movie_id")
+        full.sort_values("score", ascending=False, inplace=True)
         # full.drop(columns=["movie_id"], inplace=True)
         # full = full[["title", "genre", "year", "avg_rating"]]
         full.rename(columns={"avg_rating": "rating"}, inplace=True)
@@ -138,6 +149,30 @@ class Controller:
         self.data.update_data(user_id=user_id, movie_id=movie_id, update=update)   #calling the function from the DH to update the data
         self.stats = self.calc_movie_stats() #refreshing the stats after updating
 
+    def submit_movie(self, movie_id: int, title: str, genre: str, year: int, type: str, submitted_by: str) ->None:
+        if any(x is None for x in (movie_id, title, genre, year, type, submitted_by)): return None  #returning None if any parameter is None
+
+        self.pending.submit_movie(movie_id=movie_id, title=title, genre=genre, year=year, type=type, submitted_by=submitted_by)
+
+    def show_submitted(self) ->str:
+        return self.pending.show_submitted()
+
+    def clear_all(self) ->None:
+        self.pending.clear_all()
+
+    def clear_specific(self, movie_id: int=None, type: str=None, submitted_by: str=None) ->None:
+        if any(x is None for x in (movie_id, type, submitted_by)): return None
+
+        self.pending.clear_specific(movie_id=movie_id, type=type, submitted_by=submitted_by)
+
+    def save_movies(self) ->None:
+        self.pending.save_movies()
+
+    def update_movies(self) ->None:
+        self.pending.update_movies()
+
+C = Controller()
+C.search_movie(title="Interstellar")
 
 #next target
 #create a user watchlist function where we will only get the NaN registry of the user   #to be completed in the main.py

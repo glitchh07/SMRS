@@ -47,5 +47,5 @@ class UserHandler:
         return user.iloc[0].to_dict()
     
 
-users = UserHandler()
-print(users.get_user(username="Alice"))
+# users = UserHandler()
+# print(users.get_user(username="Alice"))
