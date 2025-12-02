@@ -36,7 +36,7 @@ class MovieHandler:
         self.save_movies()
         return movie_id
     
-    def get_movie(self, movie_id: int=None, title: str=None, genre: list=None, year: int=None) ->dict|None:
+    def get_movie(self, movie_id: list=None, title: str=None, genre: list=None, year: int=None) ->dict|None:
         if all(x is None for x in(movie_id, title, genre, year)): return None
 
         if isinstance(genre, str): genre = [genre]   #converting the genre if its a str
@@ -44,7 +44,7 @@ class MovieHandler:
         df = self.movies
         mask = pd.Series(True, index=df.index)
 
-        if movie_id is not None: mask &= (df['movie_id']==movie_id)
+        if movie_id is not None and isinstance(movie_id, list): mask &= (df['movie_id'].isin(movie_id))
         if title is not None: mask &= df['title'].str.contains(title, case=False, na=False)
         if genre is not None:
             genre_mask = pd.Series(False, index=df.index)

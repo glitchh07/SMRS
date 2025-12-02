@@ -22,7 +22,7 @@ class UserHandler:
     def save_users(self) ->None:
         self.users.to_excel(self.path, index=False)
 
-    def add_user(self, username: str, age: int) ->int:
+    def add_user(self, username: str, age: int) ->dict:
 
         if len(self.users) == 0: user_id = 1
         else: user_id = self.users['user_id'].max() + 1
@@ -35,7 +35,7 @@ class UserHandler:
 
         self.users = pd.concat([self.users, pd.DataFrame([new_row])], ignore_index=True)
         self.save_users()
-        return user_id
+        return new_row
     
     def get_user(self, user_id: int=None, username: str=None) ->dict|None:
         if user_id is None and username is None: return None

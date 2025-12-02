@@ -7,23 +7,33 @@ import pandas as pd
 import numpy as np
 
 class PendingHandler:
-    def __init__(self, filename :str="submitted_movies.xlsx", save_filename: str="movies.xlsx") ->None:
+    def __init__(self, filename :str="submitted_movies.xlsx", save_filename: str="movies.xlsx", include_processed: bool=False, user_id: str=None) ->None:
         self.path = os.path.join(data_dir, filename)
         self.save_path = os.path.join(data_dir, save_filename)
         self.submitted_movies = None
-        self.load_submitted_movies()
+        self.last_modified = 0
+        self.include_preocessed = include_processed
+        self.user_id = user_id
+        self.load_submitted_movies(include_processed, user_id)
 
-    def load_submitted_movies(self, include_processed: bool=False) ->None:   #for loading the excel file into a df
+    def load_submitted_movies(self, include_processed: bool=False, user_id: str=None) ->None:   #for loading the excel file into a df
 
         if os.path.exists(self.path): #if the file exists loading into temp df else creating empty df with columns
             df = pd.read_excel(self.path)
-            if not include_processed: df = df[~(df["status"]=="processed")] #excluding processed rows if set to False
+            if not include_processed: 
+                df = df[~(df["status"]=="processed")] #excluding processed rows if set to False
+                if user_id is not None: df = df[df["submitted_by"]==user_id]
         else:
             df = pd.DataFrame(columns=["id", "movie_id", "title", "genre", "year", "type", "submitted_by", "status", "reason", "reviewed_by"])   #assigning empty columns if no file exists
             self.save_movies(path=self.path)
         
         self.submitted_movies = df
+        self.last_modified = os.path.getmtime(self.path)
 
+    def check_and_reload(self): #function to check if the file has been modified
+        current_modified = os.path.getmtime(self.path)
+        if current_modified > self.last_modified: self.load_submitted_movies(include_processed=self.include_preocessed, user_id=self.user_id)
+    
     def save_movies(self, path=None) ->None|dict:
         
         if path and path == self.path:  #saving submitted file if path given and returning
@@ -162,12 +172,14 @@ class PendingHandler:
         #filtering out the data from the submitted df using the rejected ids
         return self.submitted_movies[self.submitted_movies["id"].isin(rejected_ids)].to_dict(orient="records") if rejected_ids else None
 
-    def submit_movie(self, movie_id: int=None, title: str=None, genre: str=None, year: int=None, type: str=None, submitted_by: str=None) ->None:
+    def submit_movie(self, movie_id: int=None, title: str=None, genre: str=None, year: int=None, type: str=None, submitted_by: int=None) ->None:
 
         if type not in ("edit", "new"): raise ValueError("type must be 'new' or 'edit'")    #raising error if data mismatched
         if type == "edit" and movie_id is None: raise ValueError("movie_id is required for 'edit' requests")
         if type == "new" and movie_id is None: movie_id = np.nan    #setting the movie_id to NaN if not given
         
+        self.check_and_reload()
+
         if len(self.submitted_movies) == 0: id = 1  #setting the id for the data
         else: id = self.submitted_movies["id"].max() + 1
        
@@ -188,14 +200,56 @@ class PendingHandler:
         self.submitted_movies = pd.concat([self.submitted_movies, pd.DataFrame([new_row])], ignore_index=True)
         self.save_movies(path=self.path)
 
-    def show_submitted(self) ->str:
-        return self.submitted_movies[self.submitted_movies["status"]=="pending"].to_string(index=False)
+    #showing data from the submitted df based on the filters and returning as a dict in records orient
+    def show_submitted(self, ids: list=None, movie_id: list=None, type: str=None, submitted_by: str=None, status: str=None, reason: str=None, reviewed_by: str=None, limit: int=5) ->dict|None:
+        if all(x is None for x in (ids, movie_id, type, submitted_by, status, reason, reviewed_by)): return None
+
+        self.check_and_reload()
+
+        #assigning the submitted df to a local df and adding mask to filter based on the filters
+        df = self.submitted_movies
+        mask = pd.Series(True, index = self.submitted_movies.index)
+        if ids is not None: mask &= df["id"].isin(ids)
+        if movie_id is not None: mask &= df["movie_id"].isin(movie_id)
+        if type is not None: mask &= df["type"] == type
+        if submitted_by is not None: mask &= df["submitted_by"] == submitted_by
+        if status is not None: mask &= df["status"] == status
+        if reason is not None: mask &= df["reason"].str.contains(reason, case=False, na=False)
+        if reviewed_by is not None: mask &= df["reviewed_by"] == reviewed_by
+
+        return df[mask].tail(limit).to_dict(orient="records")
     
+    #updating data in the submitted df based on the given values and only if status and reviewed_by matches to avoid overwritting
+    def update_submitted(self, update_dict: dict=None, status: str=None, reviewed_by: str=None) ->None|dict:
+        if update_dict is None: return None
+
+        self.check_and_reload()
+
+        #converting the dict into a local df and filtering accepted and rejected rows
+        update_df = pd.DataFrame(update_dict)
+        mask = self.submitted_movies["id"].isin(update_df["id"].tolist())
+        if status is not None: mask &= self.submitted_movies["status"] == status ; rejected_mask_temp = self.submitted_movies["status"] != status
+        if reviewed_by is not None: mask &= self.submitted_movies["reviewed_by"] == reviewed_by ; rejected_mask_temp &= self.submitted_movies["reviewed_by"] != reviewed_by
+        if rejected_mask_temp.any():
+            rejected_mask = self.submitted_movies["id"].isin(update_df["id"].tolist()) & rejected_mask_temp
+
+        if mask.any():  #checking if any row is satisfied
+            update_df = update_df.set_index("id").loc[self.submitted_movies.loc[mask, "id"]]
+
+            self.submitted_movies.loc[mask, ["movie_id", "title", "genre", "year", "type", "submitted_by", "status", "reason", "reviewed_by"]] = update_df[["movie_id", "title", "genre", "year", "type", "submitted_by", "status", "reason", "reviewed_by"]].values
+            self.save_movies(path=self.path)
+
+        if rejected_mask_temp.any():
+            return self.submitted_movies[rejected_mask].to_dict(orient="records")
+        else: return None
+
     def clear_all(self) ->None: #setting the df to empty ans saving it
         self.submitted_movies = pd.DataFrame(columns=["id", "movie_id", "title", "genre", "year", "type", "submitted_by", "status", "reason", "reviewed_by"])
         self.save_movies(path=self.path)
 
     def clear_specific(self,id: str=None, movie_id: int=None, type: str=None, submitted_by: str=None) ->None:    #filtering the df using the data and removing it from the file
+        self.check_and_reload()
+        
         df = self.submitted_movies
         if id is None:
             df = df[~((df["movie_id"]==movie_id) & (df["type"]==type) & (df["submitted_by"]==submitted_by))]
@@ -204,9 +258,11 @@ class PendingHandler:
         self.save_movies(path=self.path)
 
     #the function recieves a dict and the reviewer's username and makes changes the status and reason according to the reviewer's decision
-    def change_status_submitted(self, decision_dict: dict=None, reviewed_by: str=None) ->None|dict: #the data is in the "records" format
+    def change_status_submitted(self, decision_dict: dict, reviewed_by: str) ->None|dict: #the decision_dict should be in the "records" orient
         if decision_dict is None and reviewed_by is None: return None
         
+        self.check_and_reload()
+
         df_update = pd.DataFrame(decision_dict) #converting the dict into a df and filtering out the ids with the dict ids
         mask = (self.submitted_movies["id"].isin(df_update["id"].tolist())) & (self.submitted_movies["status"]=="reviewing") & (self.submitted_movies["reviewed_by"]==reviewed_by)
         rejected_mask = (self.submitted_movies["id"].isin(df_update["id"].tolist())) & ((self.submitted_movies["status"]!="reviewing") | (self.submitted_movies["reviewed_by"]!=reviewed_by))
@@ -225,6 +281,8 @@ class PendingHandler:
     def mark_as_reviewing(self, ids: list, reviewed_by: str) ->dict|None:   
         if any(x is None for x in(ids, reviewed_by)): return None
         
+        self.check_and_reload()
+
         mask = self.submitted_movies["id"].isin(ids) & self.submitted_movies["status"] == "pending"
         self.submitted_movies.loc[mask, ["status", "reviewed_by"]] = ["reviewing", reviewed_by]
         self.save_movies(path=self.path)
