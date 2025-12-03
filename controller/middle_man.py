@@ -87,15 +87,16 @@ class Controller:
 
         movies_df = self.movies.movies  #getting the movies which were not rated and filling the values to nan
         movies_not_rated_idx = movies_df[~movies_df["movie_id"].isin(stats.index.tolist())]["movie_id"].tolist()
-        new_rows = pd.DataFrame(
-            np.nan,
-            index = movies_not_rated_idx,
-            columns=["avg_rating", "rating_count", "recommend_ratio"]
-        )
-        new_rows.index.name = "movie_id"
+        if movies_not_rated_idx:
+            new_rows = pd.DataFrame(
+                np.nan,
+                index = movies_not_rated_idx,
+                columns=["avg_rating", "rating_count", "recommend_ratio"]
+            )
+            new_rows.index.name = "movie_id"
 
-        if stats.empty: stats = new_rows
-        else: stats = pd.concat([stats, new_rows])
+            if stats.empty: stats = new_rows
+            else: stats = pd.concat([stats, new_rows])
 
         return stats
     

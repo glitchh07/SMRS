@@ -1096,3 +1096,6 @@ def starting_the_function():
 starting_the_function()
 # print(Controller.recommend_movies(title="inter"))
 # print(Controller.search_movie(title="joker"))
+
+#fix submit history next and from the modify submit function 
+#need to write the dev frontend next time
